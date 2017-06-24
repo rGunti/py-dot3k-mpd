@@ -30,10 +30,12 @@ from time import sleep
 from mpd import MPDClient
 from dot3k.menu import Menu
 from apps.mpd_player import MPDPlayer
+from apps.wifi_app import WiFiApp
 
 
-USE_DOT3K = (get_env('DOT3K', '0') == "1")
+USE_DOT3K = (get_env('DOT3K', '0') == '1')
 USE_DOTHAT = not USE_DOT3K
+DONT_USE_WIFI = (get_env('NO_WIFI', '0') == '1')
 
 if USE_DOT3K:
     import dot3k.backlight as backlight
@@ -60,12 +62,11 @@ __status__ = "Development"
 """
 
 if __name__ == '__main__':  # code to execute if called from command-line
-    menu = Menu(
-        structure={
-            'Player': MPDPlayer()
-        },
-        lcd=lcd
-    )
+    menu = Menu(lcd=lcd)
+    
+    menu.add_item('Player', MPDPlayer())
+    if not DONT_USE_WIFI:
+        menu.add_item('WiFi', WiFiApp())
     menu.select()
 
     if USE_DOTHAT:
