@@ -56,12 +56,14 @@ else:
     from subprocess import check_output, Popen, PIPE
     from re import sub, split, MULTILINE, match, IGNORECASE
     import humanize as pp
-    import threading
+    from threading import Thread, current_thread
 
     class WiFiDataFetcher(object):
         def __init__(self, interval=1):
             self.interval = interval
             self.connected_clients = 0
+
+            self.parent_thread = current_thread()
 
             self.settings = {
                 'HOSTAPD_CONTROL_PATH': '/var/run/hostapd',
@@ -76,7 +78,7 @@ else:
             self._clients = dict()
             self._arp_table = dict()
 
-            thread = threading.Thread(target=self.run, args=())
+            thread = Thread(target=self.run, args=())
             thread.daemon = True
             thread.start()
 
@@ -88,10 +90,12 @@ else:
 
         def run(self):
             while True:
+                self.parent_thread.join(self.interval)
+                if not self.parent_thread.is_alive():
+                    break
                 self._interfaces = self._get_hostapd_interfaces()
                 self._get_hostapd()
                 self._get_arp_table()
-                sleep(5)
 
         def _get_hostapd_interfaces(self):
             return listdir(self.settings['HOSTAPD_CONTROL_PATH'])

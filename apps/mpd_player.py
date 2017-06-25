@@ -47,12 +47,13 @@ if __name__ == '__main__':  # code to execute if called from command-line
     """)
     exit(1)
 else:
-    from dot3k.menu import Menu, MenuIcon, MenuOption
+    from dot3k.menu import MenuOption
     # from dothat.backlight import set_graph, set
     from apps.utils import get_env
     from mpd import MPDClient, ProtocolError, ConnectionError
     from datetime import datetime
     from time import time
+    from apps.st7036.st7036_string_translation import st7036_replace
 
 
     class MPDPlayer(MenuOption):
@@ -71,6 +72,14 @@ else:
                 'ICON_STOP': {
                     'index': 3,
                     'bmp': [0b00000, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b11111, 0b00000]
+                },
+                'ICON_REPEAT': {
+                    'index': 4,
+                    'bmp': [0b00010, 0b01111, 0b10010, 0b10000, 0b00001, 0b01001, 0b11110, 0b01000]
+                },
+                'ICON_SHUFFLE': {
+                    'index': 5,
+                    'bmp': [0b00000, 0b00000, 0b11011, 0b00100, 0b00100, 0b11011, 0b00000, 0b00000]
                 }
             }
             self._animations = {
@@ -81,7 +90,12 @@ else:
                 }
             }
 
-            self.mpd = None
+            """ :var MPDClient """
+            self.mpd_status_reader = None
+            """ :var MPDClient """
+            self.mpd_controller = None
+
+            # self.mpd = None
             self.mpd_status = None
 
             self.volume = 100
@@ -90,16 +104,37 @@ else:
             self._reconnect()
 
         def _reconnect(self):
-            if self.mpd is not None:
-                self.mpd.disconnect()
+            # if self.mpd is not None:
+            #     self.mpd.disconnect()
 
-            self.mpd = MPDClient()
-            self.mpd.timeout = 5
-            self.mpd.idletimeout = None
+            if self.mpd_status_reader is not None:
+                try:
+                    self.mpd_status_reader.disconnect()
+                except:
+                    pass
 
-            self.mpd.connect(get_env('MPD_HOST', '127.0.0.1'), int(get_env('MPD_PORT', 6600)))
+            if self.mpd_controller is not None:
+                try:
+                    self.mpd_controller.disconnect()
+                except:
+                    pass
+
+            self.mpd_status_reader = self._init_mpd()
+            self.mpd_controller = self._init_mpd()
+
+            # self.mpd = MPDClient()
+            # self.mpd.timeout = 5
+            # self.mpd.idletimeout = None
+            # self.mpd.connect(get_env('MPD_HOST', '127.0.0.1'), int(get_env('MPD_PORT', 6600)))
 
             self.mpd_status = None
+
+        def _init_mpd(self):
+            mpd = MPDClient()
+            mpd.timeout = 5
+            mpd.idletimeout = None
+            mpd.connect(get_env('MPD_HOST', '127.0.0.1'), int(get_env('MPD_PORT', 6600)))
+            return mpd
 
         def _setup_icons(self, lcd):
             for key, value in self._icons.iteritems():
@@ -107,6 +142,11 @@ else:
 
             for key, value in self._animations.iteritems():
                 lcd.create_animation(value['index'], value['frames'], value['fps'])
+
+            self._setup = True
+
+        def cleanup(self):
+            self._setup = False
 
         @staticmethod
         def print_row(menu, row, text):
@@ -154,7 +194,7 @@ else:
             # create a new one
             try:
                 self.volume_pressed -= 5
-                self.mpd.previous()
+                self.mpd_controller.previous()
             except ConnectionError:
                 pass
             except:
@@ -169,7 +209,7 @@ else:
             # create a new one
             try:
                 self.volume_pressed -= 5
-                self.mpd.next()
+                self.mpd_controller.next()
             except ConnectionError:
                 pass
             except:
@@ -180,7 +220,8 @@ else:
         def up(self):
             try:
                 self.volume_pressed = time()
-                self.mpd.setvol(min(self.volume + 5, 100))
+                new_vol = min(self.volume + 5, 100)
+                self.mpd_controller.setvol(new_vol)
             except ConnectionError:
                 pass
             except:
@@ -190,7 +231,9 @@ else:
         def down(self):
             try:
                 self.volume_pressed = time()
-                self.mpd.setvol(max(self.volume - 5, 0))
+                new_vol = max(self.volume - 5, 0)
+                self.mpd_controller.setvol(new_vol)
+                self.volume = new_vol
             except ConnectionError:
                 pass
             except:
@@ -206,9 +249,9 @@ else:
                 if self.mpd_status is not None:
                     state = self.mpd_status['state']
                     if state == 'play' or state == 'pause':
-                        self.mpd.pause(1 if state == 'play' else 0)
+                        self.mpd_controller.pause(1 if state == 'play' else 0)
                     else:
-                        self.mpd.play()
+                        self.mpd_controller.play()
             except ConnectionError:
                 pass
             except:
@@ -224,7 +267,8 @@ else:
                 self._setup_icons(menu.lcd)
 
             try:
-                self.mpd_status = self.mpd.status()
+                self.mpd_status = self.mpd_status_reader.status()
+                self.mpd_controller.ping()
             except ConnectionError:
                 return
             status = self.mpd_status
@@ -232,6 +276,8 @@ else:
             self.volume = int(MPDPlayer.get_safe(status, 'volume', '100'))
 
             player_icon = 0
+            repeat_icon = 0
+            shuffle_icon = 0
             title_line = ''
             artist_line = ''
             player_time = '--:--'
@@ -239,25 +285,33 @@ else:
             if len(status) == 0 or 'state' not in status:
                 pass
             elif status['state'] == 'play' or status['state'] == 'pause':
-                current_song = self.mpd.currentsong()
+                current_song = self.mpd_status_reader.currentsong()
                 title_line = MPDPlayer.get_safe(current_song, 'title', '-')
                 artist_line = MPDPlayer.get_safe(current_song, 'artist', '-')
+
+                title_line = st7036_replace(title_line, False)
+                artist_line = st7036_replace(artist_line, False)
 
                 player_time = MPDPlayer.format_mpd_status_time(MPDPlayer.get_safe(status, 'time', '0'), True)
 
                 if status['state'] == 'play':
-                    player_icon = 1
+                    player_icon = self._icons['ICON_PLAY']['index']
                 else:
-                    player_icon = 2
+                    player_icon = self._icons['ICON_PAUSE']['index']
+
+                if status['random'] == '1':
+                    shuffle_icon = self._icons['ICON_SHUFFLE']['index']
+                if status['repeat'] == '1':
+                    repeat_icon = self._icons['ICON_REPEAT']['index']
             elif status['state'] == 'stop':
-                player_icon = 3
+                player_icon = self._icons['ICON_STOP']['index']
 
             dif = time() - self.volume_pressed
             if dif < 3:
                 title_line = ('VOLUME ' + str(self.volume).rjust(3) + ' %').center(16)
                 artist_line = ''
                 for i in range(0, (self.volume / 10)):
-                    artist_line += '-'
+                    artist_line += chr(3)
                 artist_line = ('[ ' + artist_line.ljust(10) + ' ]').center(16)
                 # set_graph(float(self.volume) / 100)
             else:
@@ -266,6 +320,11 @@ else:
 
             MPDPlayer.print_row(menu, 0, title_line)
             MPDPlayer.print_row(menu, 1, artist_line)
-            MPDPlayer.print_row(menu, 2, chr(player_icon) + player_time.rjust(15))
+            MPDPlayer.print_row(menu, 2,
+                                chr(player_icon) +
+                                chr(repeat_icon) +
+                                chr(shuffle_icon) +
+                                player_time.rjust(13)
+                                )
 
             menu.lcd.update_animations()
