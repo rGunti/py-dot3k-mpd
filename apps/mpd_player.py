@@ -55,6 +55,7 @@ else:
     from time import time
     from apps.st7036.st7036_string_translation import st7036_replace
 
+    USE_DOT3K = (get_env('DOT3K', '0') == '1')
 
     class MPDPlayer(MenuOption):
         def __init__(self):
@@ -192,15 +193,17 @@ else:
             # (don't know why) and the app freaks out.
             # We just try to throw away our current MPD session and
             # create a new one
-            try:
-                self.volume_pressed -= 5
-                self.mpd_controller.previous()
-            except ConnectionError:
-                pass
-            except:
-                self._reconnect()
+            if USE_DOT3K:
+                return False
+            else:
+                try:
+                    self.mpd_controller.previous()
+                except ConnectionError:
+                    pass
+                except:
+                    self._reconnect()
 
-            return True
+                return True
 
         def right(self):
             # Sometimes a protocol error is raised when executing next
