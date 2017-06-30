@@ -37,6 +37,10 @@ USE_DOT3K = (get_env('DOT3K', '0') == '1')
 USE_DOTHAT = not USE_DOT3K
 DONT_USE_WIFI = (get_env('NO_WIFI', '0') == '1')
 
+BG_R = int(get_env('BG_R', '128'))
+BG_G = int(get_env('BG_G', '128'))
+BG_B = int(get_env('BG_B', '128'))
+
 if USE_DOT3K:
     import dot3k.backlight as backlight
     import dot3k.lcd as lcd
@@ -98,7 +102,7 @@ if __name__ == '__main__':  # code to execute if called from command-line
             menu.select()
 
     backlight.set_graph(0)
-    backlight.rgb(128, 128, 128)
+    backlight.rgb(BG_R, BG_G, BG_B)
     lcd.set_contrast(50)
 
     while True:
